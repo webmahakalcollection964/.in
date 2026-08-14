@@ -641,6 +641,7 @@ footer p{
     <p>
         📞 9644697651
     </p>
+    <a href="https://www.instagram.com/mahakalcollectionmandideep/" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin-top:14px;padding:11px 18px;border-radius:25px;background:linear-gradient(45deg,#f9ce34,#ee2a7b,#6228d7);color:#fff;text-decoration:none;font-weight:bold;">📸 Instagram: @mahakalcollectionmandideep</a>
 
 </footer>
 
@@ -1790,8 +1791,46 @@ Total: ₹${total.toLocaleString("en-IN")}
 
 Please confirm my order.`;
 
-        const url = "https://wa.me/919644697651?text=" + encodeURIComponent(text);
-        window.location.href = url;
+        // WhatsApp ke saath product photo share karne ki koshish
+        // (Android/Chrome jaise supported browsers me WhatsApp select karke photo + message bhej sakte hain)
+        const productImage = product.images && product.images[0] ? product.images[0] : "";
+
+        async function shareOrderWithPhoto(){
+            try{
+                if(productImage && navigator.share && navigator.canShare){
+                    const response = await fetch(productImage);
+                    if(!response.ok) throw new Error("Image fetch failed");
+
+                    const blob = await response.blob();
+                    const extension = (blob.type && blob.type.split("/")[1]) || "jpg";
+                    const file = new File([blob], "product-photo." + extension, {
+                        type: blob.type || "image/jpeg"
+                    });
+
+                    const shareData = {
+                        title: "Mahakal Collection Order",
+                        text: text,
+                        files: [file]
+                    };
+
+                    if(navigator.canShare({files:[file]})){
+                        await navigator.share(shareData);
+                        return;
+                    }
+                }
+            }catch(error){
+                // Share cancel/fail hone par normal WhatsApp text order par fallback
+            }
+
+            const fallbackText = productImage
+                ? text + "\n\n📸 Product Photo: " + productImage
+                : text;
+
+            const url = "https://wa.me/919644697651?text=" + encodeURIComponent(fallbackText);
+            window.location.href = url;
+        }
+
+        shareOrderWithPhoto();
     };
 }
 

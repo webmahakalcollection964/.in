@@ -752,117 +752,15 @@ footer{margin-top:42px}
 </footer>
 
 
-<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-storage-compat.js"></script>
-
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
+
 /* ==============================
-   FIREBASE
+   SUPABASE PRODUCT STORAGE
 ============================== */
-const firebaseConfig = {
-    apiKey: "AIzaSyAKoniIcLX3z2ZsiLcBie5QLOhw-S0qYKg",
-    authDomain: "mahakal-collection.firebaseapp.com",
-    projectId: "mahakal-collection",
-    storageBucket: "mahakal-collection.firebasestorage.app",
-    messagingSenderId: "908767952269",
-    appId: "1:908767952269:web:17990422ce3f1a8b1191c4"
-};
-
-if (!firebase.apps.length) {
-    firebase.initializeApp(firebaseConfig);
-}
-
-const db = firebase.firestore();
-const storage = firebase.storage();
-const productsCollection = db.collection("products");
-
-function loadProductsFromFirebase(){
-    try{
-        // Firestore live listener: admin ke dashboard me product add/update/delete hote hi
-        // website ke sabhi devices/browsers par products automatically sync honge.
-        return productsCollection.onSnapshot(function(snapshot){
-            const cloudProducts = snapshot.docs.map(function(doc){
-                return Object.assign({id:doc.id}, doc.data());
-            });
-            cloudProducts.sort(function(a,b){
-                const aTime = a.createdAt && a.createdAt.toMillis ? a.createdAt.toMillis() : Number(a.createdAt || 0);
-                const bTime = b.createdAt && b.createdAt.toMillis ? b.createdAt.toMillis() : Number(b.createdAt || 0);
-                return bTime - aTime;
-            });
-            products = cloudProducts;
-            localStorage.setItem("patel_collection_products", JSON.stringify(products));
-            displayProducts();
-            console.log("Firebase live products synced:", products.length);
-        }, function(error){
-            console.error("Firebase products live-sync error:", error);
-            displayProducts();
-            showMessage("⚠️ Firebase se products sync nahi hue. Firestore Rules check karo.", false);
-        });
-    }catch(error){
-        console.error("Firebase products load error:", error);
-        displayProducts();
-        showMessage("⚠️ Firebase se products load nahi hue. Firestore Rules check karo.", false);
-    }
-}
-
-function dataUrlToBlob(dataUrl){
-    const parts = dataUrl.split(",");
-    const mime = (parts[0].match(/:(.*?);/) || [])[1] || "image/jpeg";
-    const binary = atob(parts[1]);
-    const bytes = new Uint8Array(binary.length);
-    for(let i=0;i<binary.length;i++) bytes[i] = binary.charCodeAt(i);
-    return new Blob([bytes], {type:mime});
-}
-
-function compressImageDataUrl(dataUrl, maxWidth=1000, quality=0.68){
-    return new Promise(function(resolve){
-        if(!dataUrl || !dataUrl.startsWith("data:image/")){
-            resolve(dataUrl);
-            return;
-        }
-        const img = new Image();
-        img.onload = function(){
-            const scale = Math.min(1, maxWidth / img.width);
-            const canvas = document.createElement("canvas");
-            canvas.width = Math.max(1, Math.round(img.width * scale));
-            canvas.height = Math.max(1, Math.round(img.height * scale));
-            const ctx = canvas.getContext("2d");
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            resolve(canvas.toDataURL("image/jpeg", quality));
-        };
-        img.onerror = function(){ resolve(dataUrl); };
-        img.src = dataUrl;
-    });
-}
-
-async function uploadProductImages(productId, images){
-    const urls = [];
-    for(let i=0;i<images.length;i++){
-        const image = images[i];
-        if(typeof image === "string" && (image.startsWith("https://") || image.startsWith("http://"))){
-            urls.push(image);
-            continue;
-        }
-
-        // Firebase Storage first. If Storage is not enabled/rules block it,
-        // keep a compressed image in Firestore so the product can still sync.
-        const compressed = await compressImageDataUrl(image);
-        try{
-            const ref = storage.ref(`products/${productId}/${Date.now()}-${i}.jpg`);
-            const uploadPromise = ref.putString(compressed, "data_url", {contentType:"image/jpeg"});
-            const timeoutPromise = new Promise(function(_, reject){
-                setTimeout(function(){ reject(new Error("Firebase Storage upload timeout")); }, 30000);
-            });
-            await Promise.race([uploadPromise, timeoutPromise]);
-            urls.push(await ref.getDownloadURL());
-        }catch(storageError){
-            console.warn("Storage unavailable, using compressed Firestore image:", storageError);
-            urls.push(compressed);
-        }
-    }
-    return urls;
-}
+const SUPABASE_URL = "https://okqhqnonefxildufshpx.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_yWFGV0_Ibak7V5LcoOZzLA_htwwpaJJ";
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /* ==============================
    PRODUCT DATA
@@ -870,19 +768,33 @@ async function uploadProductImages(productId, images){
 
 let products = [];
 
-try{
+async function loadProductsFromSupabase(){
+    try{
+        const { data, error } = await supabaseClient
+            .from("products")
+            .select("id, name, price, gender, category, sizes, images, created_at")
+            .order("created_at", { ascending: true });
 
-    products =
-        JSON.parse(
-            localStorage.getItem(
-                "patel_collection_products"
-            )
-        ) || [];
+        if(error) throw error;
 
-}catch(e){
+        products = (data || []).map(function(item){
+            return {
+                id: item.id,
+                name: item.name,
+                price: Number(item.price),
+                gender: item.gender,
+                category: item.category,
+                sizes: item.sizes || [],
+                images: item.images || []
+            };
+        });
 
-    products = [];
-
+        displayProducts();
+    }catch(error){
+        console.error("Supabase products load error:", error);
+        products = [];
+        displayProducts();
+    }
 }
 
 
@@ -1391,36 +1303,62 @@ async function addProduct(){
         );
 
 
-    const productId = `${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    const product = {
+
+        id:Date.now(),
+
+        name:name,
+
+        price:Number(price),
+
+        gender:gender,
+
+        category:category,
+
+        sizes:sizes,
+
+        images:selectedImages.slice()
+
+    };
+
+
+    const addButton = document.querySelector(".add-product");
+    if(addButton) addButton.disabled = true;
 
     try{
-        showMessage("⏳ Product cloud me save ho raha hai...", true);
+        const { data, error } = await supabaseClient
+            .from("products")
+            .insert({
+                name: product.name,
+                price: product.price,
+                gender: product.gender,
+                category: product.category,
+                sizes: product.sizes,
+                images: product.images
+            })
+            .select("id, name, price, gender, category, sizes, images, created_at")
+            .single();
 
-        const imageUrls = await uploadProductImages(productId, selectedImages);
+        if(error) throw error;
 
-        const product = {
-            name:name,
-            price:Number(price),
-            gender:gender,
-            category:category,
-            sizes:sizes,
-            images:imageUrls,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        };
-
-        await productsCollection.doc(productId).set(product);
-
-        const localProduct = { id:productId, ...product, createdAt: Date.now() };
-        products.unshift(localProduct);
-        localStorage.setItem("patel_collection_products", JSON.stringify(products));
+        products.push({
+            id: data.id,
+            name: data.name,
+            price: Number(data.price),
+            gender: data.gender,
+            category: data.category,
+            sizes: data.sizes || [],
+            images: data.images || []
+        });
 
         clearForm();
         displayProducts();
-        showMessage("✅ Product successfully cloud me add ho gaya!", true);
-
+        showMessage("✅ Product successfully add ho gaya!", true);
     }catch(error){
-        console.error("Firebase product save error:", error);
-        showMessage("❌ Firebase save nahi hua. Firestore/Storage rules check karo.", false);
+        console.error("Supabase product add error:", error);
+        showMessage("❌ Product save nahi hua. Supabase table/policy check karo.", false);
+    }finally{
+        if(addButton) addButton.disabled = false;
     }
 
 }
@@ -1821,14 +1759,8 @@ function displayProducts(){
         // Size order modal me select kiya jayega.
         info.appendChild(order);
 
-        // Edit + Delete Product sirf Admin ko dikhega
+        // Delete Product sirf Admin ko dikhega
         if(sessionStorage.getItem("patel_admin_logged_in") === "1"){
-            const edit = document.createElement("button");
-            edit.className = "delete";
-            edit.style.background = "#111";
-            edit.innerText = "✏️ Edit Product";
-            edit.onclick = function(){ editProduct(product.id); };
-            info.appendChild(edit);
             info.appendChild(del);
         }
 
@@ -1954,7 +1886,7 @@ function orderProduct(id){
                 </div>
             </div>
             <button class="order-submit" type="button" id="placeOrderButton">💬 Please Order on WhatsApp</button>
-            <div class="order-note">Button dabane par WhatsApp khulega aur order details message mein ready milengi.</div>
+            <div class="order-note">Order ke baad seller ko order message aur customer ke WhatsApp par screenshot-request message ready hoga.</div>
         </div>
     `;
 
@@ -2018,73 +1950,39 @@ Total: ₹${total.toLocaleString("en-IN")}
 
 Please confirm my order.`;
 
-        const url = "https://wa.me/919644697651?text=" + encodeURIComponent(text);
-        window.location.href = url;
+        const url = "https://wa.me/919301558157?text=" + encodeURIComponent(text);
+
+        // Seller ko order WhatsApp par bhejo
+        window.open(url, "_blank");
+
+        // Customer ke WhatsApp par screenshot-request message ready karo.
+        // WhatsApp security ki wajah se website khud se Send press nahi kar sakti.
+        const screenshotText =
+`Namaste ${name} ji 🙏
+
+Aapke order ke liye please jis product ko order kiya hai uska screenshot WhatsApp par send kijiye.
+
+Product: ${product.name}
+Size: ${size}
+Quantity: ${quantity}
+
+Dhanyavaad – Mahakal Collection`;
+
+        const customerWhatsappUrl =
+            "https://wa.me/91" + mobile + "?text=" + encodeURIComponent(screenshotText);
+
+        setTimeout(function(){
+            window.location.href = customerWhatsappUrl;
+        }, 700);
     };
 }
 
-
-async function editProduct(id){
-    if(sessionStorage.getItem("patel_admin_logged_in") !== "1") return;
-    const product = products.find(function(item){ return String(item.id) === String(id); });
-    if(!product) return;
-
-    const old = document.getElementById("editProductModal");
-    if(old) old.remove();
-
-    const modal = document.createElement("div");
-    modal.id = "editProductModal";
-    modal.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:10000;overflow-y:auto;padding:20px;";
-
-    const sizes = ["28","30","32","34","36","38","40","S","M","L","XL","XXL"];
-    const checked = product.sizes || [];
-    const box = document.createElement("div");
-    box.style.cssText = "max-width:520px;margin:30px auto;background:#fff;border-radius:18px;padding:22px;";
-    box.innerHTML = `
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;"><h2>✏️ Edit Product</h2><button id="closeEditProduct" type="button" style="border:0;background:#eee;width:38px;height:38px;border-radius:50%;font-size:22px;">×</button></div>
-        <label>Product Name</label><input id="editProductName" value="${escapeHtmlAttr(product.name || "")}" style="width:100%;padding:12px;margin:6px 0 12px;border:1px solid #ddd;border-radius:9px;">
-        <label>Price</label><input id="editProductPrice" type="number" value="${Number(product.price || 0)}" style="width:100%;padding:12px;margin:6px 0 12px;border:1px solid #ddd;border-radius:9px;">
-        <label>Gender</label><select id="editProductGender" style="width:100%;padding:12px;margin:6px 0 12px;border:1px solid #ddd;border-radius:9px;"><option value="Men">Men</option><option value="Women">Women</option></select>
-        <label>Category</label><input id="editProductCategory" value="${escapeHtmlAttr(product.category || "")}" style="width:100%;padding:12px;margin:6px 0 12px;border:1px solid #ddd;border-radius:9px;">
-        <label>Sizes</label><div style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 15px;">${sizes.map(function(size){return `<label style="background:#f3f3f3;padding:8px 10px;border-radius:8px;"><input class="edit-size" type="checkbox" value="${size}" ${checked.includes(size)?"checked":""}> ${size}</label>`;}).join("")}</div>
-        <button id="saveEditProduct" type="button" style="width:100%;padding:14px;border:0;border-radius:10px;background:#111;color:#fff;font-weight:bold;font-size:16px;">☁️ Save Changes to Firebase</button>`;
-
-    modal.appendChild(box); document.body.appendChild(modal);
-    document.getElementById("editProductGender").value = product.gender || "Men";
-    document.getElementById("closeEditProduct").onclick = function(){ modal.remove(); };
-    modal.addEventListener("click", function(e){ if(e.target === modal) modal.remove(); });
-
-    document.getElementById("saveEditProduct").onclick = async function(){
-        const button = this;
-        const name = document.getElementById("editProductName").value.trim();
-        const price = Number(document.getElementById("editProductPrice").value);
-        const gender = document.getElementById("editProductGender").value;
-        const category = document.getElementById("editProductCategory").value.trim();
-        const newSizes = Array.from(document.querySelectorAll(".edit-size:checked")).map(function(el){return el.value;});
-        if(!name || !price || !gender || !category){ alert("Product ki saari details fill karo."); return; }
-        button.disabled = true; button.innerText = "⏳ Firebase me update ho raha hai...";
-        try{
-            const updatedData = {name,price,gender,category,sizes:newSizes,images:product.images || [],updatedAt:firebase.firestore.FieldValue.serverTimestamp()};
-            await productsCollection.doc(String(id)).set(updatedData,{merge:true});
-            const index = products.findIndex(function(item){return String(item.id) === String(id);});
-            if(index !== -1) products[index] = Object.assign({},products[index],updatedData,{id:id,updatedAt:Date.now()});
-            localStorage.setItem("patel_collection_products",JSON.stringify(products));
-            modal.remove(); displayProducts(); showMessage("✅ Product Firebase me bhi update ho gaya!",true);
-        }catch(error){
-            console.error("Firebase product update error:",error);
-            button.disabled=false; button.innerText="☁️ Save Changes to Firebase";
-            showMessage("❌ Firebase update nahi hua. Firestore rules check karo.",false);
-        }
-    };
-}
-
-function escapeHtmlAttr(value){return String(value).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
 
 /* ==============================
-   DELETE
+    DELETE
 ============================== */
 
-function deleteProduct(id){
+async function deleteProduct(id){
 
     // Sirf logged-in Admin product delete kar sakta hai
     if(sessionStorage.getItem("patel_admin_logged_in") !== "1"){
@@ -2102,30 +2000,24 @@ function deleteProduct(id){
     }
 
 
-    products =
-        products.filter(
-            function(product){
+    try{
+        const { error } = await supabaseClient
+            .from("products")
+            .delete()
+            .eq("id", id);
 
-                return product.id !== id;
+        if(error) throw error;
 
-            }
-        );
-
-
-    productsCollection.doc(String(id)).delete()
-        .then(function(){
-            localStorage.setItem(
-                "patel_collection_products",
-                JSON.stringify(products)
-            );
-            displayProducts();
-            showMessage("✅ Product cloud se delete ho gaya.", true);
-        })
-        .catch(function(error){
-            console.error("Firebase delete error:", error);
-            showMessage("❌ Product delete nahi hua. Firebase rules check karo.", false);
-            loadProductsFromFirebase();
+        products = products.filter(function(product){
+            return product.id !== id;
         });
+
+        displayProducts();
+        showMessage("✅ Product delete ho gaya!", true);
+    }catch(error){
+        console.error("Supabase product delete error:", error);
+        showMessage("❌ Product delete nahi hua.", false);
+    }
 
 }
 
@@ -2227,9 +2119,12 @@ function adminLogout(){
 
 displayProducts();
 
-// Firebase ko source of truth rakho, localStorage ko fast fallback/cache.
-loadProductsFromFirebase();
 
+
+/* ==============================
+   LOAD PRODUCTS FROM SUPABASE
+============================== */
+loadProductsFromSupabase();
 </script>
 
 </body>
